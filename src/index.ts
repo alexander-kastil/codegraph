@@ -613,10 +613,9 @@ export class CodeGraph {
   }
 
   /**
-   * Active SQLite backend for this project's connection. `wasm` means
-   * the native better-sqlite3 install failed and the WASM fallback is
-   * serving requests at 5-10x the latency. Surfaced via `codegraph
-   * status` and the `codegraph_status` MCP tool.
+   * Active SQLite backend for this project's connection (`node-sqlite` — Node's
+   * built-in real-SQLite module). Surfaced via `codegraph status` and the
+   * `codegraph_status` MCP tool alongside the effective journal mode.
    */
   getBackend(): import('./db').SqliteBackend {
     return this.db.getBackend();

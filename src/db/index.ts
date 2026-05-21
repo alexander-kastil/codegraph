@@ -10,7 +10,7 @@ import * as path from 'path';
 import { SchemaVersion } from '../types';
 import { runMigrations, getCurrentVersion, CURRENT_SCHEMA_VERSION } from './migrations';
 
-export { SqliteDatabase, SqliteBackend, WASM_FALLBACK_FIX_RECIPE } from './sqlite-adapter';
+export { SqliteDatabase, SqliteBackend } from './sqlite-adapter';
 
 /**
  * Apply connection-level PRAGMAs. Shared by `initialize` and `open` so the two
@@ -22,15 +22,14 @@ export { SqliteDatabase, SqliteBackend, WASM_FALLBACK_FIX_RECIPE } from './sqlit
  * the lock instead of throwing "database is locked" immediately. See issue #238.
  *
  * The 5s window (was 120s) rides out a normal incremental sync; the old
- * 2-minute wait presented as a frozen, hung agent. Reads on the native WAL
- * backend never wait at all, so this timeout only governs cross-process write
- * contention and the wasm fallback — which can't do WAL (the adapter downgrades
- * it to DELETE) and so layers a bounded read retry on top (see sqlite-adapter).
+ * 2-minute wait presented as a frozen, hung agent. With WAL, reads never block
+ * on a writer, so this timeout only governs cross-process write contention
+ * (e.g. the git-hook `codegraph sync` running while the MCP server writes).
  */
 function configureConnection(db: SqliteDatabase): void {
   db.pragma('busy_timeout = 5000');      // MUST be first — see above
   db.pragma('foreign_keys = ON');
-  db.pragma('journal_mode = WAL');       // downgraded to DELETE on the wasm backend
+  db.pragma('journal_mode = WAL');       // node:sqlite supports WAL on every platform
   db.pragma('synchronous = NORMAL');     // safe with WAL mode
   db.pragma('cache_size = -64000');      // 64 MB page cache
   db.pragma('temp_store = MEMORY');      // temp tables in memory

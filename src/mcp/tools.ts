@@ -11,7 +11,6 @@ import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { clamp, validatePathWithinRoot } from '../utils';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { WASM_FALLBACK_FIX_RECIPE } from '../db';
 
 /** Maximum output length to prevent context bloat (characters) */
 const MAX_OUTPUT_LENGTH = 15000;
@@ -1332,38 +1331,21 @@ export class ToolHandler {
       `**Database size:** ${(stats.dbSizeBytes / 1024 / 1024).toFixed(2)} MB`,
     ];
 
-    // Surface the active SQLite backend. Without this, users on the
-    // silent WASM fallback (better-sqlite3 install failed) see "slow"
-    // indexing and DB-lock errors with no signal of why.
-    const backend = cg.getBackend();
-    if (backend === 'native') {
-      lines.push(`**Backend:** native (better-sqlite3)`);
-    } else if (backend === 'node-sqlite') {
-      lines.push(
-        `**Backend:** node:sqlite (Node built-in) — full WAL + FTS5. ` +
-        `For maximum speed, restore native: ${WASM_FALLBACK_FIX_RECIPE}`
-      );
-    } else {
-      lines.push(
-        `**Backend:** ⚠ wasm (better-sqlite3 unavailable) — ` +
-        `5-10x slower than native, no WAL. Fix: ${WASM_FALLBACK_FIX_RECIPE}`
-      );
-    }
+    // Surface the active SQLite backend (node:sqlite, Node's built-in real
+    // SQLite — full WAL + FTS5, no native build).
+    lines.push(`**Backend:** node:sqlite (Node built-in) — full WAL + FTS5`);
 
     // Effective journal mode. 'wal' ⇒ concurrent reads never block on a writer;
-    // anything else ⇒ they can ("database is locked"). The wasm backend can't do
-    // WAL, and even native silently falls back to DELETE on filesystems without
-    // shared-memory (network/virtualized mounts, WSL2 /mnt). See issue #238.
+    // anything else ⇒ they can ("database is locked"). node:sqlite supports WAL
+    // everywhere, so a non-wal mode means the filesystem can't (network/
+    // virtualized mounts, WSL2 /mnt). See issue #238.
     const journalMode = cg.getJournalMode();
     if (journalMode === 'wal') {
       lines.push(`**Journal mode:** wal (concurrent reads safe)`);
     } else {
       lines.push(
         `**Journal mode:** ⚠ ${journalMode || 'unknown'} — WAL not active, so reads ` +
-        `can block on a concurrent write` +
-        // wasm can't do WAL at all; the real-SQLite backends only lack it when the
-        // filesystem doesn't support shared memory (network mounts, WSL2 /mnt).
-        (backend === 'wasm' ? '' : ' (WAL appears unsupported on this filesystem)')
+        `can block on a concurrent write (WAL appears unsupported on this filesystem)`
       );
     }
 

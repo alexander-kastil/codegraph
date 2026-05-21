@@ -1,10 +1,9 @@
 /**
  * node:sqlite backend (issue #238 follow-up).
  *
- * Proves Node's built-in node:sqlite works as a real CodeGraph backend — the
- * fallback that replaces the no-WAL wasm path when better-sqlite3 can't load.
- * Forces it via CODEGRAPH_SQLITE_BACKEND and drives a real index + queries, so
- * WAL, FTS5 search, and @named-param writes are all exercised end-to-end.
+ * node:sqlite (Node's built-in real SQLite) is now the sole backend. This drives
+ * a real index + queries through it, so WAL, FTS5 search, and @named-param
+ * writes are all exercised end-to-end.
  *
  * Skipped on Node < 22.5 where node:sqlite doesn't exist.
  */
@@ -27,10 +26,8 @@ try {
 describe.skipIf(!nodeSqliteAvailable)('node:sqlite backend — real index + queries', () => {
   let dir: string;
   let cg: CodeGraph;
-  const prevEnv = process.env.CODEGRAPH_SQLITE_BACKEND;
 
   beforeAll(async () => {
-    process.env.CODEGRAPH_SQLITE_BACKEND = 'node-sqlite'; // force the backend under test
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-nodesqlite-'));
     fs.writeFileSync(path.join(dir, 'a.ts'), 'export function helper(): number { return 1; }\n');
     fs.writeFileSync(
@@ -42,12 +39,10 @@ describe.skipIf(!nodeSqliteAvailable)('node:sqlite backend — real index + quer
 
   afterAll(() => {
     cg?.close();
-    if (prevEnv === undefined) delete process.env.CODEGRAPH_SQLITE_BACKEND;
-    else process.env.CODEGRAPH_SQLITE_BACKEND = prevEnv;
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('actually selected the node:sqlite backend (env override took effect)', () => {
+  it('uses the node:sqlite backend', () => {
     expect(cg.getBackend()).toBe('node-sqlite');
   });
 
