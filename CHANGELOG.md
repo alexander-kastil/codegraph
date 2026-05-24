@@ -7,6 +7,42 @@ a [GitHub Release](https://github.com/colbymchenry/codegraph/releases) tagged
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-05-24
+
+### Added
+- **Framework support: Angular (v2–21).** CodeGraph now detects Angular projects
+  and extracts three kinds of intelligence from them:
+  - **Route extraction**: every `*.routes.ts` file (and any TypeScript file that
+    imports from `@angular/router` with a typed `Routes` variable) is scanned for
+    route object literals. Each navigable route emits a `route` node with its
+    local path (e.g. `/dashboard`, `/services/:id`), so `codegraph query route`
+    surfaces the full routing map of an Angular application.
+  - **Component and guard references**: route nodes are linked by `references`
+    edges to the component they load — whether via a synchronous `component:`
+    binding or a lazy `loadComponent: () => import(…).then(m => m.Foo)` thunk.
+    Guard classes in `canActivate`, `canDeactivate`, `canMatch`, `canLoad`, and
+    `canActivateChild` arrays are also linked, so querying a guard class surfaces
+    every route it protects.
+  - **Lazy child-route links**: `loadChildren` entries emit an `imports` edge to
+    the child routes file and a `references` edge to the exported routes constant,
+    making the full lazy-load hierarchy visible in the graph.
+  - **DI resolution**: the `resolve()` pass maps Angular dependency-injection
+    tokens (from `inject(ClassName)` calls or typed constructor parameters) to
+    their class node, preferring Angular file-name conventions (`.service.ts`,
+    `.guard.ts`, `.store.ts`, `.resolver.ts`, `.interceptor.ts`, etc.) at higher
+    confidence (0.85) over generic class matches (0.7).
+  - **Nested children**: routes defined inline in a `children: […]` array are
+    each extracted as independent route nodes — a balanced-brace reader ensures
+    that child-route properties never bleed into the parent route's property
+    lookup.
+  - **Detection**: project-level detection checks for `@angular/core` in
+    `package.json` dependencies, falling back to the presence of `*.component.ts`
+    or `*.routes.ts` files for projects that vendor their deps differently.
+  - **24 tests** covering `detect()`, `extract()`, and `resolve()` at the unit
+    level, plus 3 end-to-end integration tests that run a full `CodeGraph.indexAll()`
+    pipeline against synthetic Angular projects and assert on route nodes and
+    component reference edges.
+
 ## [0.9.2] - 2026-05-21
 
 ### Added
@@ -93,6 +129,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   find its bundle. The release pipeline now verifies every package reached the
   registry (and is idempotent), so a release can't pass green-but-broken again.
 
+[0.9.3]: https://github.com/colbymchenry/codegraph/releases/tag/v0.9.3
 [0.9.2]: https://github.com/colbymchenry/codegraph/releases/tag/v0.9.2
 [0.9.1]: https://github.com/colbymchenry/codegraph/releases/tag/v0.9.1
 

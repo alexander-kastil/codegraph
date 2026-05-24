@@ -20,6 +20,7 @@ import { goResolver } from './go';
 import { rustResolver } from './rust';
 import { aspnetResolver } from './csharp';
 import { swiftUIResolver, uikitResolver, vaporResolver } from './swift';
+import { angularResolver } from './angular';
 
 /**
  * All registered framework resolvers
@@ -34,6 +35,7 @@ const FRAMEWORK_RESOLVERS: FrameworkResolver[] = [
   reactResolver,
   svelteResolver,
   vueResolver,
+  angularResolver,
   // Python
   djangoResolver,
   flaskResolver,
@@ -121,3 +123,4 @@ export { goResolver } from './go';
 export { rustResolver } from './rust';
 export { aspnetResolver } from './csharp';
 export { swiftUIResolver, uikitResolver, vaporResolver } from './swift';
+export { angularResolver } from './angular';
