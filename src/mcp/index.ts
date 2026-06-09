@@ -18,7 +18,7 @@
 import * as path from 'path';
 import CodeGraph, { findNearestCodeGraphRoot } from '../index';
 import { watchDisabledReason } from '../sync';
-import { StdioTransport, JsonRpcRequest, JsonRpcNotification, ErrorCodes } from './transport';
+import { StdioTransport, Transport, JsonRpcRequest, JsonRpcNotification, ErrorCodes } from './transport';
 import { tools, ToolHandler } from './tools';
 import { SERVER_INSTRUCTIONS } from './server-instructions';
 
@@ -81,7 +81,7 @@ function firstRootPath(result: unknown): string | null {
  * functionality as tools that can be called by AI assistants.
  */
 export class MCPServer {
-  private transport: StdioTransport;
+  private transport: Transport;
   private cg: CodeGraph | null = null;
   private toolHandler: ToolHandler;
   private projectPath: string | null;
@@ -96,11 +96,11 @@ export class MCPServer {
   // re-issue roots/list on every tool call.
   private rootsAttempted = false;
 
-  constructor(projectPath?: string) {
+  constructor(projectPath?: string, transport?: Transport, workspacePath?: string) {
     this.projectPath = projectPath || null;
-    this.transport = new StdioTransport();
+    this.transport = transport ?? new StdioTransport();
     // Create ToolHandler eagerly — cross-project queries work even without a default project
-    this.toolHandler = new ToolHandler(null);
+    this.toolHandler = new ToolHandler(null, workspacePath);
   }
 
   /**
@@ -118,10 +118,12 @@ export class MCPServer {
     process.on('SIGINT', () => this.stop());
     process.on('SIGTERM', () => this.stop());
 
-    // When the parent process (Claude Code) exits, stdin closes.
-    // Detect this and shut down gracefully to prevent orphaned processes.
-    process.stdin.on('end', () => this.stop());
-    process.stdin.on('close', () => this.stop());
+    // Stdio only: when the parent process (Claude Code) exits, stdin closes.
+    // HTTP transport has no stdin connection to watch.
+    if (this.transport instanceof StdioTransport) {
+      process.stdin.on('end', () => this.stop());
+      process.stdin.on('close', () => this.stop());
+    }
   }
 
   /**
@@ -459,5 +461,6 @@ export class MCPServer {
 }
 
 // Export for use in CLI
-export { StdioTransport } from './transport';
+export { StdioTransport, Transport } from './transport';
+export { HttpTransport } from './http-transport';
 export { tools, ToolHandler } from './tools';

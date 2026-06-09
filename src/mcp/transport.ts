@@ -56,6 +56,20 @@ export const ErrorCodes = {
 export type MessageHandler = (message: JsonRpcRequest | JsonRpcNotification) => Promise<void>;
 
 /**
+ * Common interface for all MCP transports (stdio, HTTP, …).
+ * MCPServer depends on this interface so the backing channel is swappable.
+ */
+export interface Transport {
+  start(handler: MessageHandler): void;
+  stop(): void;
+  /** Server-initiated request to the client (e.g. roots/list). May reject if unsupported. */
+  request(method: string, params?: unknown, timeoutMs?: number): Promise<unknown>;
+  sendResult(id: string | number, result: unknown): void;
+  sendError(id: string | number | null, code: number, message: string, data?: unknown): void;
+  notify(method: string, params?: unknown): void;
+}
+
+/**
  * Stdio Transport for MCP
  *
  * Reads JSON-RPC messages from stdin and writes responses to stdout.
