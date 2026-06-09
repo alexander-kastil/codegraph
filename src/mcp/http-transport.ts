@@ -10,10 +10,16 @@
  */
 
 import * as http from 'http';
-import type { Transport, MessageHandler, JsonRpcRequest, JsonRpcNotification } from './transport';
+import type {
+  JsonRpcTransport,
+  JsonRpcResponse,
+  MessageHandler,
+  JsonRpcRequest,
+  JsonRpcNotification,
+} from './transport';
 import { ErrorCodes } from './transport';
 
-export class HttpTransport implements Transport {
+export class HttpTransport implements JsonRpcTransport {
   private server: http.Server | null = null;
   // JSON-RPC request id → HTTP response waiting for sendResult/sendError
   private pending = new Map<string | number, http.ServerResponse>();
@@ -48,6 +54,15 @@ export class HttpTransport implements Transport {
   /** Not supported over HTTP — caller falls back to --path / cwd. */
   request(_method: string, _params?: unknown, _timeoutMs?: number): Promise<unknown> {
     return Promise.resolve(null);
+  }
+
+  /** Route a fully-formed JSON-RPC response back to the HTTP request that carries its id. */
+  send(response: JsonRpcResponse): void {
+    if (response.id === null || response.id === undefined) return;
+    const res = this.pending.get(response.id);
+    if (!res) return;
+    this.pending.delete(response.id);
+    writeJson(res, response);
   }
 
   sendResult(id: string | number, result: unknown): void {

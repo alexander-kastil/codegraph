@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SchemaVersion } from '../types';
 import { runMigrations, getCurrentVersion, CURRENT_SCHEMA_VERSION } from './migrations';
+import { getCodeGraphDir } from '../directory';
 
 export { SqliteDatabase, SqliteBackend } from './sqlite-adapter';
 
@@ -187,6 +188,36 @@ export class DatabaseConnection {
   }
 
   /**
+   * Lightweight, non-blocking maintenance to run after bulk writes
+   * (indexAll, sync). Two operations:
+   *
+   *   - `PRAGMA optimize` — incremental ANALYZE; SQLite only re-analyzes
+   *     tables whose row counts changed materially since the last
+   *     ANALYZE. Without it, the query planner has no statistics on the
+   *     freshly-bulk-loaded tables and can pick suboptimal indexes.
+   *
+   *   - `PRAGMA wal_checkpoint(PASSIVE)` — fold pending WAL pages back
+   *     into the main database file so the WAL file doesn't grow
+   *     unboundedly between automatic checkpoints (auto-fires at 1000
+   *     pages by default; large indexAll runs blow past that).
+   *
+   * Both operations are silently swallowed on failure — they're a
+   * best-effort optimization, never load-bearing for correctness.
+   */
+  runMaintenance(): void {
+    try {
+      this.db.exec('PRAGMA optimize');
+    } catch {
+      // ignore
+    }
+    try {
+      this.db.exec('PRAGMA wal_checkpoint(PASSIVE)');
+    } catch {
+      // ignore (e.g., not in WAL mode)
+    }
+  }
+
+  /**
    * Close the database connection
    */
   close(): void {
@@ -210,5 +241,5 @@ export const DATABASE_FILENAME = 'codegraph.db';
  * Get the default database path for a project
  */
 export function getDatabasePath(projectRoot: string): string {
-  return path.join(projectRoot, '.codegraph', DATABASE_FILENAME);
+  return path.join(getCodeGraphDir(projectRoot), DATABASE_FILENAME);
 }

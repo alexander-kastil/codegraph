@@ -16,11 +16,16 @@ import { vueResolver } from './vue';
 import { djangoResolver, flaskResolver, fastapiResolver } from './python';
 import { railsResolver } from './ruby';
 import { springResolver } from './java';
+import { playResolver } from './play';
 import { goResolver } from './go';
 import { rustResolver } from './rust';
 import { aspnetResolver } from './csharp';
 import { swiftUIResolver, uikitResolver, vaporResolver } from './swift';
 import { angularResolver } from './angular';
+import { swiftObjcBridgeResolver } from './swift-objc';
+import { reactNativeBridgeResolver } from './react-native';
+import { expoModulesResolver } from './expo-modules';
+import { fabricViewResolver } from './fabric';
 
 /**
  * All registered framework resolvers
@@ -44,6 +49,7 @@ const FRAMEWORK_RESOLVERS: FrameworkResolver[] = [
   railsResolver,
   // Java
   springResolver,
+  playResolver,
   // Go
   goResolver,
   // Rust
@@ -54,6 +60,14 @@ const FRAMEWORK_RESOLVERS: FrameworkResolver[] = [
   swiftUIResolver,
   uikitResolver,
   vaporResolver,
+  // Swift ↔ Objective-C cross-language bridging (mixed iOS apps)
+  swiftObjcBridgeResolver,
+  // React Native JS ↔ native bridge (legacy + TurboModules)
+  reactNativeBridgeResolver,
+  // Expo Modules — Function/AsyncFunction/Property DSL on Swift/Kotlin
+  expoModulesResolver,
+  // React Native Fabric / Codegen view components — TS spec → component nodes
+  fabricViewResolver,
 ];
 
 /**
@@ -119,8 +133,13 @@ export { vueResolver } from './vue';
 export { djangoResolver, flaskResolver, fastapiResolver } from './python';
 export { railsResolver } from './ruby';
 export { springResolver } from './java';
+export { playResolver } from './play';
 export { goResolver } from './go';
 export { rustResolver } from './rust';
 export { aspnetResolver } from './csharp';
 export { swiftUIResolver, uikitResolver, vaporResolver } from './swift';
 export { angularResolver } from './angular';
+export { swiftObjcBridgeResolver } from './swift-objc';
+export { reactNativeBridgeResolver } from './react-native';
+export { expoModulesResolver } from './expo-modules';
+export { fabricViewResolver } from './fabric';
