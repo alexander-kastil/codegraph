@@ -21,6 +21,7 @@ import { goResolver } from './go';
 import { rustResolver } from './rust';
 import { aspnetResolver } from './csharp';
 import { swiftUIResolver, uikitResolver, vaporResolver } from './swift';
+import { angularResolver } from './angular';
 import { swiftObjcBridgeResolver } from './swift-objc';
 import { reactNativeBridgeResolver } from './react-native';
 import { expoModulesResolver } from './expo-modules';
@@ -39,6 +40,7 @@ const FRAMEWORK_RESOLVERS: FrameworkResolver[] = [
   reactResolver,
   svelteResolver,
   vueResolver,
+  angularResolver,
   // Python
   djangoResolver,
   flaskResolver,
@@ -136,6 +138,7 @@ export { goResolver } from './go';
 export { rustResolver } from './rust';
 export { aspnetResolver } from './csharp';
 export { swiftUIResolver, uikitResolver, vaporResolver } from './swift';
+export { angularResolver } from './angular';
 export { swiftObjcBridgeResolver } from './swift-objc';
 export { reactNativeBridgeResolver } from './react-native';
 export { expoModulesResolver } from './expo-modules';

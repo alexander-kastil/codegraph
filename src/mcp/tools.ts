@@ -24,11 +24,12 @@ import type { Node, Edge, SearchResult, Subgraph, NodeKind } from '../types';
 import { isTestFile, normalizeNameToken } from '../search/query-utils';
 import {
   existsSync,
+  readdirSync,
   readFileSync,
 } from 'fs';
 import { clamp, validatePathWithinRoot, validateProjectPath, isConfigLeafNode, CONFIG_LEAF_LANGUAGES } from '../utils';
 import { isGeneratedFile } from '../extraction/generated-detection';
-import { resolve as resolvePath } from 'path';
+import { isAbsolute, join, resolve as resolvePath } from 'path';
 
 /** Maximum output length to prevent context bloat (characters) */
 const MAX_OUTPUT_LENGTH = 15000;
@@ -359,11 +360,13 @@ export interface ToolResult {
 }
 
 /**
- * Common projectPath property for cross-project queries
+ * Common projectPath property for cross-project queries.
+ * Accepts: a bare repo name ("angular-app"), an absolute path, or a
+ * path relative to the configured workspace root.
  */
 const projectPathProperty: PropertySchema = {
   type: 'string',
-  description: 'Path to a different project with .codegraph/ initialized. If omitted, uses current project. Use this to query other codebases.',
+  description: 'Repo name (e.g. "angular-app") or absolute path to a project with .codegraph/ initialized. Use codegraph_repos to list available repos. If omitted, uses the default project.',
 };
 
 /**
@@ -533,6 +536,19 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'codegraph_repos',
+    description: 'List all repositories available in the workspace. Use this first when working with a multi-repo setup to discover repo names and pass them as `projectPath` in other tool calls. Shows index status, file count, and language breakdown for each repo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workspacePath: {
+          type: 'string',
+          description: 'Root directory containing the repos. Defaults to the server workspace.',
+        },
+      },
+    },
+  },
+  {
     name: 'codegraph_files',
     description: 'Indexed file tree with language + symbol counts. Faster than Glob for project layout.',
     inputSchema: {
@@ -607,7 +623,7 @@ export class ToolHandler {
   // subsequent calls don't pay any cost.
   private catchUpGate: Promise<void> | null = null;
 
-  constructor(private cg: CodeGraph | null) {}
+  constructor(private cg: CodeGraph | null, private workspacePath?: string) {}
 
   /**
    * Update the default CodeGraph instance (e.g. after lazy initialization)
@@ -740,21 +756,30 @@ export class ToolHandler {
     if (!projectPath) {
       if (!this.cg) {
         const searched = this.defaultProjectHint ?? process.cwd();
+        const hint = this.workspacePath
+          ? `\n  • Use codegraph_repos to list available repos, then pass projectPath: "<repo-name>"`
+          : `\n  • Pass projectPath to the tool call, e.g. projectPath: "/absolute/path/to/your/project"\n  • Or add --path to the server's MCP config args: ["serve", "--mcp", "--path", "/absolute/path/to/your/project"]`;
         throw new Error(
           'No CodeGraph project is loaded for this session.\n' +
-          `Searched for a .codegraph/ directory starting from: ${searched}\n` +
-          'The index is likely fine — this is a working-directory detection issue: ' +
-          "the MCP client launched the server outside your project and didn't report the " +
-          'workspace root. Fix it either way:\n' +
-          '  • Pass projectPath to the tool call, e.g. projectPath: "/absolute/path/to/your/project"\n' +
-          '  • Or add --path to the server\'s MCP config args: ["serve", "--mcp", "--path", "/absolute/path/to/your/project"]'
+          `Searched for a .codegraph/ directory starting from: ${searched}` +
+          hint
         );
       }
       return this.cg;
     }
 
+    // Resolve bare repo name (no path separators) via workspace root.
+    // "angular-app" → "/workspace/angular-app"
+    const resolvedInput =
+      this.workspacePath && !isAbsolute(projectPath) && !/[/\\]/.test(projectPath)
+        ? join(this.workspacePath, projectPath)
+        : projectPath;
+
     // Check cache first (using original path as key)
-    if (this.projectCache.has(projectPath)) {
+    if (this.projectCache.has(resolvedInput)) {
+      return this.projectCache.get(resolvedInput)!;
+    }
+    if (resolvedInput !== projectPath && this.projectCache.has(projectPath)) {
       return this.projectCache.get(projectPath)!;
     }
 
@@ -771,10 +796,10 @@ export class ToolHandler {
     }
 
     // Walk up parent directories to find nearest .codegraph/
-    const resolvedRoot = findNearestCodeGraphRoot(projectPath);
+    const resolvedRoot = findNearestCodeGraphRoot(resolvedInput);
 
     if (!resolvedRoot) {
-      throw new Error(`CodeGraph not initialized in ${projectPath}. Run 'codegraph init' in that project first.`);
+      throw new Error(`CodeGraph not initialized in ${resolvedInput}. Run 'codegraph init' in that project first.`);
     }
 
     // If the path resolves to the default project, reuse the already-open
@@ -791,16 +816,15 @@ export class ToolHandler {
     // Check if we already have this resolved root cached (different path, same project)
     if (this.projectCache.has(resolvedRoot)) {
       const cg = this.projectCache.get(resolvedRoot)!;
-      // Cache under original path too for faster future lookups
-      this.projectCache.set(projectPath, cg);
+      this.projectCache.set(resolvedInput, cg);
       return cg;
     }
 
-    // Open and cache under both paths
+    // Open and cache under resolved paths
     const cg = loadCodeGraph().openSync(resolvedRoot);
     this.projectCache.set(resolvedRoot, cg);
-    if (projectPath !== resolvedRoot) {
-      this.projectCache.set(projectPath, cg);
+    if (resolvedInput !== resolvedRoot) {
+      this.projectCache.set(resolvedInput, cg);
     }
     return cg;
   }
@@ -1049,6 +1073,8 @@ export class ToolHandler {
           // (see handleStatus), so we skip the auto-banner wrapper here to
           // avoid duplicating the same info at the top of the response.
           return await this.handleStatus(args);
+        case 'codegraph_repos':
+          return await this.handleRepos(args);
         case 'codegraph_files':
           result = await this.handleFiles(args); break;
         default:
@@ -2943,6 +2969,87 @@ export class ToolHandler {
         lines.push(`- ${p.path} (edited ${ageMs}ms ago, ${label})`);
       }
     }
+
+    return this.textResult(lines.join('\n'));
+  }
+
+  /**
+   * Handle codegraph_repos — list indexed repos in the workspace.
+   *
+   * Scans the workspace root (or the path passed as workspacePath) for
+   * subdirectories that contain a .codegraph/codegraph.db file and reports
+   * their stats. Repos that are not yet indexed are listed as "not indexed"
+   * so the agent knows they exist and can ask the user to index them.
+   */
+  private async handleRepos(args: Record<string, unknown>): Promise<ToolResult> {
+    const wsPath = (args.workspacePath as string | undefined) ?? this.workspacePath;
+    if (!wsPath) {
+      return this.textResult(
+        'No workspace configured. Start the server with `--workspace /path/to/repos` ' +
+        'or pass `workspacePath` to this call.'
+      );
+    }
+
+    let names: string[];
+    try {
+      names = readdirSync(wsPath) as string[];
+    } catch {
+      return this.errorResult(`Cannot read workspace directory: ${wsPath}`);
+    }
+
+    const { statSync } = await import('fs');
+    const dirs = names
+      .filter((n) => { try { return statSync(join(wsPath, n)).isDirectory(); } catch { return false; } })
+      .sort();
+    if (dirs.length === 0) {
+      return this.textResult(`Workspace ${wsPath} contains no subdirectories.`);
+    }
+
+    const indexed: string[] = [];
+    const notIndexed: string[] = [];
+    const lines: string[] = ['## Available Repositories', ''];
+
+    for (const name of dirs) {
+      const repoPath = join(wsPath, name);
+      const dbPath = join(repoPath, '.codegraph', 'codegraph.db');
+      if (!existsSync(dbPath)) {
+        notIndexed.push(name);
+        continue;
+      }
+      indexed.push(name);
+
+      let statsLine = '';
+      try {
+        const cg = this.getCodeGraph(name);
+        const s = cg.getStats();
+        const langs = Object.entries(s.filesByLanguage)
+          .filter(([, c]) => (c as number) > 0)
+          .map(([l]) => l)
+          .join(', ');
+        statsLine = `${s.fileCount} files · ${s.nodeCount} nodes` + (langs ? ` · ${langs}` : '');
+      } catch {
+        statsLine = 'indexed (could not read stats)';
+      }
+
+      lines.push(`### ${name}`);
+      lines.push(`Path: \`${repoPath}\``);
+      lines.push(statsLine);
+      lines.push(`Use: \`projectPath: "${name}"\``);
+      lines.push('');
+    }
+
+    if (notIndexed.length > 0) {
+      lines.push('### Not yet indexed');
+      for (const name of notIndexed) {
+        lines.push(`- ${name} (run \`codegraph index ${join(wsPath, name)}\` to index)`);
+      }
+      lines.push('');
+    }
+
+    lines.push(`**${indexed.length} indexed, ${notIndexed.length} not indexed**`);
+    lines.push('');
+    lines.push('Pass the repo name as `projectPath` to any codegraph tool to query that repo.');
+    lines.push('You can query symbols across repos by calling multiple tools with different `projectPath` values.');
 
     return this.textResult(lines.join('\n'));
   }

@@ -31,6 +31,13 @@ export interface MCPEngineOptions {
    * cheap. Honors {@link watchDisabledReason} regardless.
    */
   watch?: boolean;
+  /**
+   * Root directory holding multiple repos. When set, the shared ToolHandler
+   * enables the `codegraph_repos` tool and resolves bare repo names
+   * (`projectPath: "angular-app"`) against this root. Used by the HTTP /
+   * multi-repo serving path.
+   */
+  workspacePath?: string;
 }
 
 /**
@@ -49,12 +56,12 @@ export class MCPEngine {
   // Set on first `ensureInitialized` so subsequent sessions don't redo work.
   private initPromise: Promise<void> | null = null;
   private watcherStarted = false;
-  private opts: Required<MCPEngineOptions>;
+  private opts: { watch: boolean };
   private closed = false;
 
   constructor(opts: MCPEngineOptions = {}) {
     this.opts = { watch: opts.watch ?? true };
-    this.toolHandler = new ToolHandler(null);
+    this.toolHandler = new ToolHandler(null, opts.workspacePath);
   }
 
   /**

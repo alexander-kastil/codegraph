@@ -39,6 +39,7 @@ import * as path from 'path';
 import { spawn, StdioOptions } from 'child_process';
 import { findNearestCodeGraphRoot, getCodeGraphDir } from '../directory';
 import { StdioTransport } from './transport';
+import { HttpTransport } from './http-transport';
 import { MCPEngine } from './engine';
 import { MCPSession } from './session';
 import {
@@ -199,6 +200,22 @@ function spawnDetachedDaemon(root: string): void {
   }
 }
 
+/** Optional knobs for {@link MCPServer}. All paths are pre-resolved by the caller. */
+export interface MCPServerOptions {
+  /**
+   * Serve MCP over HTTP on this port instead of stdio/daemon. When set, start()
+   * runs a single standalone HTTP server (no per-client child processes, no
+   * shared daemon) — the containerized / remote-URL serving mode.
+   */
+  httpPort?: number;
+  /**
+   * Root directory containing multiple repos. Enables the `codegraph_repos`
+   * tool and bare-name `projectPath` resolution (`"angular-app"` →
+   * `<workspace>/angular-app`).
+   */
+  workspacePath?: string;
+}
+
 /**
  * MCP Server for CodeGraph
  *
@@ -208,10 +225,17 @@ function spawnDetachedDaemon(root: string): void {
  * Backwards-compatible constructor and `start()` signature with the
  * pre-issue-#411 implementation: callers continue to do
  * `new MCPServer(path).start()`. Internally we now pick from direct / proxy /
- * daemon at start time.
+ * daemon at start time. Passing `{ httpPort }` selects the standalone HTTP mode.
  */
 export class MCPServer {
   private projectPath: string | null;
+  // HTTP serving (set via the `--http` CLI flag). When non-null, start() runs a
+  // standalone HTTP MCP server instead of the stdio/daemon machinery.
+  private httpPort: number | null;
+  // Multi-repo workspace root (set via `--workspace`). Enables the
+  // `codegraph_repos` tool and bare-name projectPath resolution. Threaded into
+  // the engine's ToolHandler in HTTP and direct modes.
+  private workspacePath: string | null;
   // Direct-mode-only state. In daemon mode the per-connection sessions live
   // inside the Daemon class; in proxy mode there is no session at all.
   private session: MCPSession | null = null;
@@ -224,10 +248,12 @@ export class MCPServer {
   private hostPpid: number | null = parseHostPpid(process.env[HOST_PPID_ENV]);
   // Idempotency guard for stop().
   private stopped = false;
-  private mode: 'unstarted' | 'direct' | 'proxy' | 'daemon' = 'unstarted';
+  private mode: 'unstarted' | 'direct' | 'proxy' | 'daemon' | 'http' = 'unstarted';
 
-  constructor(projectPath?: string) {
+  constructor(projectPath?: string, opts: MCPServerOptions = {}) {
     this.projectPath = projectPath || null;
+    this.httpPort = opts.httpPort ?? null;
+    this.workspacePath = opts.workspacePath ?? null;
   }
 
   /**
@@ -244,6 +270,13 @@ export class MCPServer {
    * mode — a misbehaving daemon must never block a session from starting.
    */
   async start(): Promise<void> {
+    // Standalone HTTP mode — a long-lived server reachable over a URL, typically
+    // in a container. Bypasses the stdio/daemon/proxy machinery entirely: HTTP
+    // is request/response and the process isn't a child of any MCP host.
+    if (this.httpPort !== null) {
+      return this.startHttp(this.httpPort);
+    }
+
     // The detached daemon process itself. Checked before the opt-out so the
     // daemon honors the same env it was spawned with (it never sets NO_DAEMON).
     if (daemonInternalSet()) {
@@ -254,6 +287,13 @@ export class MCPServer {
     // get the pre-#411 single-process behavior.
     if (daemonOptOutSet()) {
       return this.startDirect('CODEGRAPH_NO_DAEMON set');
+    }
+
+    // A multi-repo workspace needs the engine's ToolHandler to carry the
+    // workspace root, which the shared daemon doesn't thread through; serve it
+    // in direct mode so `codegraph_repos` and bare-name resolution work.
+    if (this.workspacePath) {
+      return this.startDirect('workspace mode');
     }
 
     const root = resolveDaemonRoot(this.projectPath);
@@ -314,7 +354,7 @@ export class MCPServer {
     if (reason && process.env.CODEGRAPH_MCP_DEBUG) {
       process.stderr.write(`[CodeGraph MCP] Direct mode: ${reason}.\n`);
     }
-    this.engine = new MCPEngine();
+    this.engine = new MCPEngine({ workspacePath: this.workspacePath ?? undefined });
     const transport = new StdioTransport();
     this.session = new MCPSession(transport, this.engine, {
       explicitProjectPath: this.projectPath,
@@ -336,6 +376,31 @@ export class MCPServer {
     this.mode = 'direct';
     this.installSignalHandlers();
     this.installPpidWatchdog();
+  }
+
+  /**
+   * Standalone HTTP MCP server. One shared engine + one long-lived
+   * {@link MCPSession} over an {@link HttpTransport}; every `POST /mcp` is fed
+   * to the same session, so the MCP handshake state (protocol version, roots
+   * support) persists across requests. No daemon, no proxy, no stdin watchdog —
+   * the process is meant to run as a service (e.g. in a container) and is
+   * reaped by SIGINT/SIGTERM. `roots/list` is a no-op over HTTP, so a project
+   * comes from `--path` or per-call `projectPath`/`--workspace`.
+   */
+  private async startHttp(port: number): Promise<void> {
+    this.engine = new MCPEngine({ workspacePath: this.workspacePath ?? undefined });
+    const transport = new HttpTransport(port);
+    this.session = new MCPSession(transport, this.engine, {
+      explicitProjectPath: this.projectPath,
+    });
+
+    if (this.projectPath) {
+      void this.engine.ensureInitialized(this.projectPath);
+    }
+
+    this.session.start();
+    this.mode = 'http';
+    this.installSignalHandlers();
   }
 
   /**
@@ -451,6 +516,8 @@ function sleep(ms: number): Promise<void> {
 
 // Export for use in CLI
 export { StdioTransport } from './transport';
+export type { JsonRpcTransport } from './transport';
+export { HttpTransport } from './http-transport';
 export { tools, ToolHandler } from './tools';
 // Surface a few daemon-mode bits for tests + diagnostics.
 export { Daemon } from './daemon';

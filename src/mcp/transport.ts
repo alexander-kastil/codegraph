@@ -67,9 +67,9 @@ export const ErrorCodes = {
 export type MessageHandler = (message: JsonRpcRequest | JsonRpcNotification) => Promise<void>;
 
 /**
- * Generic JSON-RPC transport interface — common surface for stdio and socket
- * carriers. Anything below the session layer (initialize, tool dispatch, etc.)
- * talks to this, not to a concrete transport class.
+ * Generic JSON-RPC transport interface — common surface for stdio, socket, and
+ * HTTP carriers. Anything below the session layer (initialize, tool dispatch,
+ * etc.) talks to this, not to a concrete transport class.
  */
 export interface JsonRpcTransport {
   start(handler: MessageHandler): void;

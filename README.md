@@ -359,6 +359,41 @@ Builds the per-project knowledge graph index. A single global `codegraph install
 
 That's it — your agent will use CodeGraph tools automatically when a `.codegraph/` directory exists.
 
+### Docker (HTTP transport)
+
+Run the MCP server in a container and connect agents over HTTP — no local install needed.
+
+```sh
+docker build -t codegraph-mcp .
+
+docker run -d \
+  -v /path/to/your/project:/workspace \
+  -p 3333:3333 \
+  --name codegraph \
+  codegraph-mcp
+```
+
+The container initializes and indexes the project on first start. The `.codegraph/` database is written into the mounted volume and persists across restarts.
+
+Connect your agent by adding to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "http",
+      "url": "http://localhost:3333/mcp"
+    }
+  }
+}
+```
+
+Re-index after code changes: `docker exec codegraph node /app/dist/bin/codegraph.js sync /workspace`
+
+Health check: `GET http://localhost:3333/health` → `200 ok`
+
+Environment variables: `WORKSPACE_PATH` (default `/workspace`), `CODEGRAPH_PORT` (default `3333`).
+
 <details>
 <summary><strong>Manual Setup (Alternative)</strong></summary>
 

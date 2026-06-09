@@ -1111,8 +1111,11 @@ program
   .description('Start CodeGraph as an MCP server for AI assistants')
   .option('-p, --path <path>', 'Project path (optional for MCP mode, uses rootUri from client)')
   .option('--mcp', 'Run as MCP server (stdio transport)')
+  .option('--http', 'Run as MCP server over HTTP instead of stdio')
+  .option('--port <port>', 'HTTP port (default: 3333, only used with --http)', '3333')
+  .option('--workspace <path>', 'Root directory containing multiple repos (enables codegraph_repos tool and bare-name projectPath resolution)')
   .option('--no-watch', 'Disable the file watcher (no auto-sync; useful on slow filesystems like WSL2 /mnt drives)')
-  .action(async (options: { path?: string; mcp?: boolean; watch?: boolean }) => {
+  .action(async (options: { path?: string; mcp?: boolean; http?: boolean; port?: string; workspace?: string; watch?: boolean }) => {
     const projectPath = options.path ? resolveProjectPath(options.path) : undefined;
 
     // Commander sets watch=false when --no-watch is passed. Route it through
@@ -1122,10 +1125,17 @@ program
     }
 
     try {
-      if (options.mcp) {
+      if (options.http) {
+        const { MCPServer } = await import('../mcp/index');
+        const port = parseInt(options.port ?? '3333', 10);
+        const workspace = options.workspace ? path.resolve(options.workspace) : undefined;
+        const server = new MCPServer(projectPath, { httpPort: port, workspacePath: workspace });
+        await server.start();
+      } else if (options.mcp) {
         // Start MCP server - it handles initialization lazily based on rootUri from client
         const { MCPServer } = await import('../mcp/index');
-        const server = new MCPServer(projectPath);
+        const workspace = options.workspace ? path.resolve(options.workspace) : undefined;
+        const server = new MCPServer(projectPath, { workspacePath: workspace });
         await server.start();
         // Server will run until terminated
       } else {
